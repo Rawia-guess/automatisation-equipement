@@ -1,0 +1,3 @@
+Ticket_ID;Date_Demande;Type_Action;Equipement;Type_Equipement;Site;Priorite;Technicien_Assigne;Date_Planifiee;Date_Realisation;Statut;Commande_Materiel;Maj_Firmware;Preuve_Execution;Validation_Superviseur;SLA_Jours;Date_Planifiee_dt;Date_Realisation_dt;EN_RETARD;FAIT_SANS_PREUVE;FAIT_NON_VALIDE
+T002;02/02/2026;MISE_A_JOUR;SW-CORE-1;Switch;Site_B;NORMALE;Ali;06/02/2026;06/02/2026;FAIT;NON;OUI;PHOTO_OK;NON;3;2026-06-02;2026-06-02;False;False;True
+T006;02/02/2026;DEPANNAGE;OLT-3;OLT;Site_E;CRITIQUE;Omar;03/02/2026;05/02/2026;FAIT;NON;NON;;NON;1;2026-03-02;2026-05-02;False;True;True
