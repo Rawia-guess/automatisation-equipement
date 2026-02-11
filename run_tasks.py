@@ -1,120 +1,62 @@
-import os
 import pandas as pd
 from datetime import datetime
-from netmiko import ConnectHandler
-from netmiko.exceptions import NetmikoTimeoutException, NetmikoAuthenticationException
+from pathlib import Path
 
+INPUT = Path("equipement_reseau.csv")          
+OUTDIR = Path("outputs")             
 
+def parse_date(s):
+    return pd.to_datetime(s, errors="coerce")
 
+def main():
+    OUTDIR.mkdir(exist_ok=True)
 
+    # Lire CSV (Excel FR -> souvent séparateur ;)
+    df = pd.read_csv(INPUT, sep=";", dtype=str).fillna("")
+    df.columns = df.columns.str.strip()
 
-CSV_PATH = "equipement_reseau.csv"
-OUTPUT_DIR = "outputs"
+    # Dates
+    df["Date_Planifiee_dt"] = parse_date(df.get("Date_Planifiee", ""))
+    df["Date_Realisation_dt"] = parse_date(df.get("Date_Realisation", ""))
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+    # Retard = pas réalisé ET date planifiée < aujourd’hui
+    today = pd.Timestamp.today().normalize()
+    df["EN_RETARD"] = df["Date_Realisation_dt"].isna() & df["Date_Planifiee_dt"].notna() & (df["Date_Planifiee_dt"] < today)
 
-def save_text(path: str, text: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+    # Qualité
+    df["FAIT_SANS_PREUVE"] = (df["Statut"].str.upper() == "FAIT") & (df.get("Preuve_Execution", "").str.strip() == "")
+    df["FAIT_NON_VALIDE"] = (df["Statut"].str.upper() == "FAIT") & (df.get("Validation_Superviseur", "").str.upper().str.strip() != "OUI")
 
-def parse_commands(cmds: str):
-    # Commands dans le CSV séparées par |
-    if not isinstance(cmds, str) or not cmds.strip():
-        return []
-    return [c.strip() for c in cmds.split("|") if c.strip()]
+    # Exports
+    retards = df[df["EN_RETARD"]].copy()
+    qualite = df[df["FAIT_SANS_PREUVE"] | df["FAIT_NON_VALIDE"]].copy()
 
-def run():
-    df = pd.read_csv(CSV_PATH, sep=";", dtype=str).fillna("")
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Si technicien vide -> NON_ASSIGNE
+    tech_col = "Technicien_Assigne"
+    if tech_col not in df.columns:
+        df[tech_col] = "NON_ASSIGNE"
+    df[tech_col] = df[tech_col].replace("", "NON_ASSIGNE")
 
-    results = []
+    # Stats techniciens
+    tech = df.groupby(tech_col).agg(
+        Tickets_Total=("Ticket_ID", "count"),
+        Retards=("EN_RETARD", "sum"),
+        Fait_Sans_Preuve=("FAIT_SANS_PREUVE", "sum"),
+        Fait_Non_Valide=("FAIT_NON_VALIDE", "sum"),
+    ).reset_index()
 
-    for _, row in df.iterrows():
-        ticket = row.get("Ticket_ID", "").strip()
-        ip = row.get("IP", "").strip()
-        device_type = row.get("Device_Type", "").strip()
-        username = row.get("Username", "").strip()
-        password = row.get("Password", "").strip()
-        secret = row.get("Enable_Secret", "").strip()
-        action = row.get("Action", "").strip().upper()
-        commands = parse_commands(row.get("Commands", ""))
+    # Sauvegardes
+    df.to_csv(OUTDIR / "data_enrichie.csv", index=False, sep=";", encoding="utf-8")
+    retards.to_csv(OUTDIR / "tickets_en_retard.csv", index=False, sep=";", encoding="utf-8")
+    qualite.to_csv(OUTDIR / "controle_qualite.csv", index=False, sep=";", encoding="utf-8")
+    tech.to_csv(OUTDIR / "suivi_techniciens.csv", index=False, sep=";", encoding="utf-8")
 
-        status = "OK"
-        message = ""
-        out_text = ""
-
-        device = {
-            "device_type": device_type,
-            "host": ip,
-            "username": username,
-            "password": password,
-            "secret": secret if secret else None,
-        }
-
-        try:
-            conn = ConnectHandler(**device)
-
-            # Si équipement nécessite enable
-            if secret:
-                conn.enable()
-
-            if action == "AUDIT":
-                # Exécute des show
-                for cmd in commands:
-                    out_text += f"\n### {cmd}\n"
-                    out_text += conn.send_command(cmd, expect_string=None)
-
-            elif action == "BACKUP":
-                # Sauvegarde running-config (vendor dépendant, ici cisco ios)
-                out_text = conn.send_command("show running-config")
-
-            elif action == "PUSH":
-                # Push commandes (config mode). Ici on suppose que la liste contient conf t, end etc.
-                # Mieux: envoyer uniquement les lignes de config, Netmiko gère le mode config.
-                # Donc si ton CSV met "conf t", "end", etc., on les filtre.
-                config_lines = [c for c in commands if c.lower() not in ("conf t", "configure terminal", "end", "wr mem", "write memory")]
-                out_text += conn.send_config_set(config_lines)
-
-                # Sauvegreve si tu veux
-                out_text += "\n### SAVE\n"
-                out_text += conn.send_command("write memory")
-
-            else:
-                status = "SKIP"
-                message = f"Action inconnue: {action}"
-
-            conn.disconnect()
-
-        except (NetmikoTimeoutException, NetmikoAuthenticationException) as e:
-            status = "FAIL"
-            message = f"{type(e).__name__}: {str(e)}"
-        except Exception as e:
-            status = "FAIL"
-            message = f"ERROR: {type(e).__name__}: {str(e)}"
-
-        # Sauvegarde output par ticket/IP
-        safe_ticket = ticket if ticket else "NO_TICKET"
-        file_name = f"{safe_ticket}_{ip}_{action}_{now}.txt".replace(":", "_")
-        file_path = os.path.join(OUTPUT_DIR, file_name)
-        save_text(file_path, out_text)
-
-        results.append({
-            "Ticket_ID": ticket,
-            "IP": ip,
-            "Action": action,
-            "Status": status,
-            "Message": message,
-            "Output_File": file_path
-        })
-
-    # Export résumé CSV
-    res_df = pd.DataFrame(results)
-    summary_path = os.path.join(OUTPUT_DIR, f"summary_{now}.csv")
-    res_df.to_csv(summary_path, index=False, sep=";", encoding="utf-8")
-
+    # Affichage résumé console
     print("✅ Terminé")
-    print(f"- Résultats: {summary_path}")
-    print(f"- Outputs:   {OUTPUT_DIR}/")
+    print(f"- Retards: {len(retards)}")
+    print(f"- Qualité: {len(qualite)}")
+    print(f"- Techniciens: {len(tech)}")
+    print(f"📁 Fichiers dans: {OUTDIR.resolve()}")
 
 if __name__ == "__main__":
-    run()
+    main()
