@@ -11,7 +11,7 @@ def parse_date(s):
 def main():
     OUTDIR.mkdir(exist_ok=True)
 
-    # Lire CSV (Excel FR -> souvent séparateur ;)
+    # Lire CSV 
     df = pd.read_csv(INPUT, sep=";", dtype=str).fillna("")
     df.columns = df.columns.str.strip()
 
@@ -19,7 +19,7 @@ def main():
     df["Date_Planifiee_dt"] = parse_date(df.get("Date_Planifiee", ""))
     df["Date_Realisation_dt"] = parse_date(df.get("Date_Realisation", ""))
 
-    # Retard = pas réalisé ET date planifiée < aujourd’hui
+    # Retard = pas réalisé ET date planifiée avant aujourd’hui
     today = pd.Timestamp.today().normalize()
     df["EN_RETARD"] = df["Date_Realisation_dt"].isna() & df["Date_Planifiee_dt"].notna() & (df["Date_Planifiee_dt"] < today)
 
