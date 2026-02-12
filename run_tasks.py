@@ -52,11 +52,11 @@ def main():
     tech.to_csv(OUTDIR / "suivi_techniciens.csv", index=False, sep=";", encoding="utf-8")
 
     # Affichage résumé console
-    print("✅ Terminé")
+    print(" Terminé")
     print(f"- Retards: {len(retards)}")
     print(f"- Qualité: {len(qualite)}")
     print(f"- Techniciens: {len(tech)}")
-    print(f"📁 Fichiers dans: {OUTDIR.resolve()}")
+    print(f" Fichiers dans: {OUTDIR.resolve()}")
 
 if __name__ == "__main__":
     main()
